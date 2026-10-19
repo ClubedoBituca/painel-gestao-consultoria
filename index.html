@@ -242,13 +242,11 @@ tr:hover td{background:#FAFAFA}
 .login-field input:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(200,37,38,.08)}
 .login-error{font-size:12px;color:var(--red);background:var(--red-light);border:1px solid rgba(200,37,38,.2);border-radius:6px;padding:8px 12px;width:100%;text-align:center;display:none;margin-bottom:14px}
 .login-error.visible{display:block}
+.login-status{font-size:12px;color:var(--text-muted);text-align:center;margin-top:14px}
+.login-status[hidden]{display:none}
 .btn-login{width:100%;height:42px;background:#fff;color:var(--text);border:1px solid var(--border);border-radius:7px;font-size:14px;font-weight:600;cursor:pointer;transition:border-color .15s;letter-spacing:.2px;display:flex;align-items:center;justify-content:center}
 .btn-login:hover{border-color:#bbb}
 .btn-login:disabled{opacity:.55;cursor:not-allowed}
-.login-warning{font-size:11px;color:var(--text-faint);margin-top:0;text-align:center;line-height:1.5}
-.login-iframe-hint{width:100%;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);text-align:center}
-.login-iframe-hint a{font-size:13px;color:var(--red);font-weight:600;text-decoration:none}
-.login-iframe-hint a:hover{text-decoration:underline}
 
 /* IA CHAT */
 .ia-msg{display:flex;flex-direction:column;gap:4px;max-width:88%}
@@ -283,19 +281,16 @@ tr:hover td{background:#FAFAFA}
     <div class="login-subtitle">Acesso restrito Suno</div>
     <p class="login-domains">Entre com sua conta corporativa <strong>@suno.com.br</strong> ou <strong>@sunoresearch.com.br</strong>.</p>
     <div class="login-error" id="login-error"></div>
-    <button class="btn-login" id="btn-login">
+    <button class="btn-login" id="btn-login" type="button" disabled>
       <svg width="18" height="18" viewBox="0 0 24 24" style="vertical-align:-4px;margin-right:8px">
         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/>
         <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/>
         <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/>
         <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/>
       </svg>
-      Entrar com Google
+      <span id="login-button-label">Entrar com Google</span>
     </button>
-    <div class="login-iframe-hint" id="login-iframe-hint" style="display:none">
-      <p class="login-warning">Se o login não abrir corretamente aqui dentro, abra em nova aba:</p>
-      <a href="#" id="login-newtab" target="_blank" rel="noopener noreferrer">Abrir login em nova aba ↗</a>
-    </div>
+    <p class="login-status" id="login-status" role="status" aria-live="polite" hidden></p>
   </div>
 </div>
 
@@ -823,11 +818,8 @@ const DATA_ENDPOINT = '/api/data'; // Snowflake (ANALYTICS.CONSULTORIA) via serv
 // dashboard Suno já embutido no DataHub):
 //   - O DataHub e os dashboards embutidos usam o MESMO projeto Supabase Auth
 //     (Google OAuth configurado dentro do Supabase, não em cada app).
-//   - Dentro do iframe do DataHub: handshake via postMessage -- o painel pede
-//     a sessão (`EMBED_REQUEST_SESSION`) pro DataHub (window.parent), que já
-//     está logado, e recebe `{ access_token, refresh_token }` de volta. Sem
-//     redirect nenhum (evita o problema do Google recusar renderizar a
-//     própria tela de login dentro de iframe de terceiro).
+//   - Dentro do iframe do DataHub: handshake via postMessage. Se não vier
+//     sessão, o login Google roda num popup e devolve a sessão ao iframe.
 //   - Fora do iframe (acesso direto): botão "Entrar com Google" chama
 //     `supabaseClient.auth.signInWithOAuth(...)` -- o Supabase cuida do
 //     redirect/callback inteiro, não temos endpoint de auth próprio.
@@ -840,8 +832,36 @@ const SUPABASE_URL = 'https://tgmfaugvcsgbbvkmxrdl.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRnbWZhdWd2Y3NnYmJ2a214cmRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNjA0MTIsImV4cCI6MjA5MDczNjQxMn0.bkEQicvsfie2IknPoFRXNvru2YEmUAagRgRdk1Rxiiw';
 const DATAHUB_URL = 'https://datahub.suno.com.br';
 const EMBED_HANDSHAKE_TIMEOUT_MS = 3000;
+const AUTH_POPUP_FLAG = 'suno_auth_popup';
+const AUTH_POPUP_MESSAGE = 'SUNO_AUTH_POPUP_SESSION';
+const AUTH_POPUP_WINDOW = 'suno-auth';
+const AUTH_POPUP_FEATURES = 'width=480,height=680,menubar=no,toolbar=no';
+const isPopupStart = new URLSearchParams(window.location.search).get('auth') === 'popup';
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+function isPopupFlagSet() {
+  try { return sessionStorage.getItem(AUTH_POPUP_FLAG) === '1'; } catch (e) { return false; }
+}
+
+function setPopupFlag(on) {
+  try {
+    if (on) sessionStorage.setItem(AUTH_POPUP_FLAG, '1');
+    else sessionStorage.removeItem(AUTH_POPUP_FLAG);
+  } catch (e) { /* sem sessionStorage, o retorno abre o painel na janela do popup */ }
+}
+
+const loginPopup = isPopupStart || isPopupFlagSet();
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    // O hash do callback é processado na própria janela do popup.
+    flowType: 'implicit',
+    // Não persistir uma segunda cópia do refresh token no popup.
+    persistSession: !loginPopup,
+  },
+});
+let authPopup = null;
+let authPopupWatcher = null;
+let popupSessionReceived = false;
+let popupCompleted = false;
 
 function isEmbedded() {
   try { return window.self !== window.top; } catch (e) { return true; }
@@ -873,33 +893,100 @@ function requestEmbeddedSession() {
   });
 }
 
+function setLoginFeedback({ status = '', error = '', waiting = false } = {}) {
+  document.getElementById('btn-login').disabled = waiting;
+  document.getElementById('login-button-label').textContent = waiting ? 'Aguardando login…' : 'Entrar com Google';
+  const statusEl = document.getElementById('login-status');
+  statusEl.textContent = status;
+  statusEl.hidden = !status;
+  const errorEl = document.getElementById('login-error');
+  errorEl.textContent = error;
+  errorEl.classList.toggle('visible', Boolean(error));
+}
+
+function signInWithRedirect() {
+  // A origem exata precisa estar cadastrada em Redirect URLs no Supabase.
+  supabaseClient.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })
+    .then(({ error }) => { if (error) showLoginScreen('Não foi possível iniciar o login. Tente novamente.'); })
+    .catch(() => showLoginScreen('Não foi possível iniciar o login. Tente novamente.'));
+}
+
+// Deve abrir no próprio clique; se houver await antes, o navegador pode bloquear o popup.
+function openLoginPopup() {
+  if (authPopup && !authPopup.closed) { authPopup.focus(); return; }
+  const url = new URL(window.location.origin);
+  url.searchParams.set('auth', 'popup');
+  let popup;
+  try { popup = window.open(url.toString(), AUTH_POPUP_WINDOW, AUTH_POPUP_FEATURES); } catch (e) { popup = null; }
+  if (!popup) {
+    setLoginFeedback({ error: 'O navegador bloqueou a janela de login. Libere popups para este site e tente novamente.' });
+    return;
+  }
+  authPopup = popup;
+  popupSessionReceived = false;
+  setLoginFeedback({ status: 'Conclua o login na janela aberta.', waiting: true });
+  clearInterval(authPopupWatcher);
+  authPopupWatcher = setInterval(() => {
+    if (!authPopup.closed) return;
+    clearInterval(authPopupWatcher);
+    authPopup = null;
+    if (!popupSessionReceived && !document.getElementById('login-screen').classList.contains('hidden')) {
+      setLoginFeedback({ error: 'A janela de login foi fechada antes da conclusão. Tente novamente.' });
+    }
+  }, 500);
+}
+
+function onLoginPopupMessage(event) {
+  if (event.origin !== window.location.origin || !authPopup || event.source !== authPopup) return;
+  const data = event.data;
+  if (!data || data.type !== AUTH_POPUP_MESSAGE || typeof data.access_token !== 'string' || !data.access_token ||
+      typeof data.refresh_token !== 'string' || !data.refresh_token) return;
+  popupSessionReceived = true;
+  supabaseClient.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token })
+    .then(({ error }) => {
+      if (error) {
+        popupSessionReceived = false;
+        setLoginFeedback({ error: 'Não foi possível concluir o login. Tente novamente.' });
+      }
+    })
+    .catch(() => {
+      popupSessionReceived = false;
+      setLoginFeedback({ error: 'Não foi possível concluir o login. Tente novamente.' });
+    });
+}
+
+function finishPopupLogin(session) {
+  if (!session?.access_token || !session?.refresh_token) {
+    showLoginScreen('Não foi possível concluir o login. Tente novamente.');
+    return;
+  }
+  setPopupFlag(false);
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage(
+      { type: AUTH_POPUP_MESSAGE, access_token: session.access_token, refresh_token: session.refresh_token },
+      window.location.origin,
+    );
+    window.close();
+    return;
+  }
+  // Se o navegador removeu o vínculo com o iframe, o painel abre nesta janela.
+  init();
+}
+
 // Idempotente -- pode ser chamado de novo (ex.: sessão expirou no meio do
 // uso) sem duplicar listeners.
 let loginScreenReady = false;
 
-function showLoginScreen() {
+function showLoginScreen(error = '') {
   document.getElementById('login-screen').classList.remove('hidden');
+  setLoginFeedback({ error });
   if (loginScreenReady) return;
   loginScreenReady = true;
 
   document.getElementById('btn-login').addEventListener('click', () => {
-    supabaseClient.auth.signInWithOAuth({
-      provider: 'google',
-      // Sem path/trailing slash -- precisa bater EXATAMENTE com o que está
-      // cadastrado em Redirect URLs no Supabase, senão ele cai pro Site URL
-      // padrão do projeto (que é o do DataHub, não o nosso).
-      options: { redirectTo: window.location.origin },
-    });
+    if (isEmbedded()) { openLoginPopup(); return; }
+    signInWithRedirect();
   });
-
-  // Se estivermos embutidos e o handshake com o DataHub falhar/expirar, o
-  // botão "Entrar com Google" aparece, mas clicar nele tentaria navegar o
-  // IFRAME pro Google -- que recusa renderizar sua tela de login pra
-  // terceiros. Mostra o fallback de abrir em nova aba nesse caso.
-  if (isEmbedded()) {
-    document.getElementById('login-iframe-hint').style.display = '';
-    document.getElementById('login-newtab').href = window.location.href;
-  }
 }
 
 // Fix (achado em produção, 2026-10-01): NÃO dá pra chamar getSession() de
@@ -915,18 +1002,29 @@ function showLoginScreen() {
 // storage/hash, e de novo a cada mudança real depois disso.
 let authBootstrapped = false;
 
-supabaseClient.auth.onAuthStateChange((_event, session) => {
-  if (!authBootstrapped) {
-    authBootstrapped = true;
-    bootstrapAuth(session);
-    return;
-  }
-  // Depois do boot, uma sessão chegando só pode ser login concluído no meio
-  // do uso (ex.: usuário clicou Entrar com a tela de login já visível).
-  if (session && loginScreenReady) {
-    loadAndRender().then((ok) => { if (ok) document.getElementById('login-screen').classList.add('hidden'); });
-  }
-});
+if (isPopupStart) {
+  setPopupFlag(true);
+  window.history.replaceState(null, '', window.location.pathname);
+  signInWithRedirect();
+} else {
+  window.addEventListener('message', onLoginPopupMessage);
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (loginPopup) {
+      if (session && !popupCompleted) { popupCompleted = true; finishPopupLogin(session); }
+      else if (event === 'INITIAL_SESSION' && !session) showLoginScreen('Não foi possível concluir o login. Tente novamente.');
+      return;
+    }
+    if (!authBootstrapped) {
+      authBootstrapped = true;
+      bootstrapAuth(session);
+      return;
+    }
+    // Uma sessão recebida pelo popup deve inicializar os controles do painel.
+    if (session && loginScreenReady && !document.getElementById('login-screen').classList.contains('hidden')) {
+      init();
+    }
+  });
+}
 
 async function bootstrapAuth(session) {
   if (session) { init(); return; }
@@ -4179,9 +4277,7 @@ function bindEvents() {
 // ================================================================
 // INIT
 // ================================================================
-// Separado de init() pra poder ser chamado de novo quando uma sessão chega
-// tarde (retorno do redirect do Google no fluxo standalone, ver setupAuth())
-// sem reexecutar buildAllMS()/bindEvents() (não são idempotentes).
+// Separado de init() para permitir recarga dos dados sem recriar controles.
 async function loadAndRender() {
   const ok = await loadData();
   document.getElementById('main-loading').style.display = 'none';
@@ -4198,9 +4294,13 @@ async function loadAndRender() {
   return ok;
 }
 
+let appInitialized = false;
 async function init() {
-  buildAllMS();
-  bindEvents();
+  if (!appInitialized) {
+    appInitialized = true;
+    buildAllMS();
+    bindEvents();
+  }
   await loadAndRender();
 }
 
